@@ -1,100 +1,99 @@
 // ===== Storage Keys =====
-const STORAGE_KEY = 'track-expense-data';
+const STORAGE_KEY  = 'track-expense-data';
 const GH_TOKEN_KEY = 'track-expense-gh-token';
-const GH_REPO_KEY  = 'track-expense-gh-repo';
-const GH_FILE_KEY  = 'track-expense-gh-file';
+const GH_GIST_KEY  = 'track-expense-gh-gist';
+const GIST_FILENAME = 'track-expense-data.json';
 
-// ===== GitHub Config =====
+// ===== GitHub Gist Config =====
 function getGhConfig() {
   return {
-    token: localStorage.getItem(GH_TOKEN_KEY) || '',
-    repo:  localStorage.getItem(GH_REPO_KEY)  || 'samirmaikap/track-expense',
-    file:  localStorage.getItem(GH_FILE_KEY)  || 'data.json',
+    token:  localStorage.getItem(GH_TOKEN_KEY) || '',
+    gistId: localStorage.getItem(GH_GIST_KEY)  || '',
   };
 }
 
-function saveGhConfig(token, repo, file) {
+function saveGhConfig(token, gistId) {
   localStorage.setItem(GH_TOKEN_KEY, token);
-  localStorage.setItem(GH_REPO_KEY,  repo);
-  localStorage.setItem(GH_FILE_KEY,  file);
+  localStorage.setItem(GH_GIST_KEY,  gistId);
 }
 
 function clearGhConfig() {
   localStorage.removeItem(GH_TOKEN_KEY);
+  localStorage.removeItem(GH_GIST_KEY);
 }
 
-// ===== GitHub API =====
-let ghFileSha = null; // SHA of the remote data.json, needed for updates
-
-async function ghFetch(path, method = 'GET', body = null) {
+// ===== Gist API  (no SHA – just GET/PATCH) =====
+async function gistFetch(gistId, method = 'GET', body = null) {
   const { token } = getGhConfig();
-  const headers = {
-    'Accept': 'application/vnd.github.v3+json',
-  };
+  const headers = { 'Accept': 'application/vnd.github.v3+json' };
   if (token) headers['Authorization'] = `token ${token}`;
   const opts = { method, headers };
   if (body) {
     headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  return fetch(`https://api.github.com/${path}`, opts);
+  return fetch(`https://api.github.com/gists/${gistId}`, opts);
 }
 
 async function loadFromGitHub() {
-  const { token, repo, file } = getGhConfig();
-  if (!token) return null;
+  const { token, gistId } = getGhConfig();
+  if (!token || !gistId) return null;
   try {
-    const res = await ghFetch(`repos/${repo}/contents/${file}`);
-    if (res.status === 404) return { categories: [] }; // file not yet created
-    if (!res.ok) throw new Error(`GitHub ${res.status}`);
+    const res = await gistFetch(gistId);
+    if (!res.ok) throw new Error(`Gist GET ${res.status}`);
     const json = await res.json();
-    ghFileSha = json.sha;
-    const decoded = JSON.parse(atob(json.content.replace(/\n/g, '')));
-    return decoded;
+    const file = json.files[GIST_FILENAME];
+    if (!file) return { categories: [] };
+    // Use raw_url for content if truncated
+    const content = file.truncated
+      ? await (await fetch(file.raw_url)).text()
+      : file.content;
+    return JSON.parse(content);
   } catch (err) {
-    console.error('GitHub load failed:', err);
+    console.error('Gist load failed:', err);
     return null;
   }
 }
 
 async function saveToGitHub(data) {
-  const { token, repo, file } = getGhConfig();
-  if (!token) return false;
+  const { token, gistId } = getGhConfig();
+  if (!token || !gistId) return false;
   try {
     setSyncStatus('syncing');
-    // Always fetch fresh SHA before writing to avoid 409 conflicts
-    if (!ghFileSha) {
-      const check = await ghFetch(`repos/${repo}/contents/${file}`);
-      if (check.ok) {
-        const checkJson = await check.json();
-        ghFileSha = checkJson.sha;
-      }
-    }
-    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
-    const body = {
-      message: `Update ${file} – ${new Date().toISOString().slice(0, 10)}`,
-      content,
-      ...(ghFileSha ? { sha: ghFileSha } : {}),
-    };
-    const res = await ghFetch(`repos/${repo}/contents/${file}`, 'PUT', body);
-    if (res.status === 409) {
-      // SHA conflict – refresh SHA and retry once
-      ghFileSha = null;
-      return saveToGitHub(data);
-    }
+    const res = await gistFetch(gistId, 'PATCH', {
+      files: { [GIST_FILENAME]: { content: JSON.stringify(data, null, 2) } },
+    });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.message || `GitHub ${res.status}`);
+      throw new Error(err.message || `Gist PATCH ${res.status}`);
     }
-    const json = await res.json();
-    ghFileSha = json.content.sha;
     setSyncStatus('ok');
     return true;
   } catch (err) {
-    console.error('GitHub save failed:', err);
+    console.error('Gist save failed:', err);
     setSyncStatus('error', err.message);
     return false;
   }
+}
+
+// Auto-create a gist if the user has a token but no gist ID yet
+async function createGist(token) {
+  const res = await fetch('https://api.github.com/gists', {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/vnd.github.v3+json',
+      'Authorization': `token ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      description: 'Track Expense data',
+      public: false,
+      files: { [GIST_FILENAME]: { content: JSON.stringify({ categories: [] }, null, 2) } },
+    }),
+  });
+  if (!res.ok) throw new Error(`Could not create gist: ${res.status}`);
+  const json = await res.json();
+  return json.id;
 }
 
 // ===== Sync Status Indicator =====
@@ -718,8 +717,7 @@ function showSnackbar(message) {
 const settingsModal = $('#settingsModal');
 const settingsForm = $('#settingsForm');
 const ghTokenInput = $('#ghToken');
-const ghRepoInput = $('#ghRepo');
-const ghFileInput = $('#ghFile');
+const ghGistInput = $('#ghGist');
 const btnSettings = $('#btnSettings');
 const btnCancelSettings = $('#btnCancelSettings');
 const btnClearToken = $('#btnClearToken');
@@ -728,36 +726,50 @@ function openSettingsModal() {
   const cfg = getGhConfig();
   ghTokenInput.value = cfg.token ? '••••••••' : '';
   ghTokenInput.dataset.hasExisting = cfg.token ? '1' : '0';
-  ghRepoInput.value = cfg.repo;
-  ghFileInput.value = cfg.file;
+  ghGistInput.value = cfg.gistId;
   settingsModal.showModal();
 }
 
 settingsForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const tokenVal = ghTokenInput.value.trim();
-  const repo = ghRepoInput.value.trim();
-  const file = ghFileInput.value.trim() || 'data.json';
-  // If user didn't change the masked token, keep existing
+  const gistVal  = ghGistInput.value.trim();
   const existing = localStorage.getItem(GH_TOKEN_KEY) || '';
   const token = (tokenVal === '••••••••' && ghTokenInput.dataset.hasExisting === '1') ? existing : tokenVal;
-  saveGhConfig(token, repo, file);
+
+  let gistId = gistVal;
   settingsModal.close();
-  if (token) {
-    showSnackbar('Syncing from GitHub…');
-    setSyncStatus('syncing');
-    const remote = await loadFromGitHub();
-    if (remote) {
-      appData = remote;
-      saveLocal(appData);
-      render();
-      setSyncStatus('ok');
-      showSnackbar('Synced from GitHub');
-    } else {
-      // Push local data to GitHub
-      await saveToGitHub(appData);
-      showSnackbar('Local data pushed to GitHub');
+
+  if (!token) return;
+
+  // Auto-create gist if none provided
+  if (!gistId) {
+    try {
+      showSnackbar('Creating gist…');
+      setSyncStatus('syncing');
+      gistId = await createGist(token);
+      showSnackbar('Gist created!');
+    } catch (err) {
+      showSnackbar('Could not create gist: ' + err.message);
+      setSyncStatus('error', err.message);
+      return;
     }
+  }
+
+  saveGhConfig(token, gistId);
+
+  showSnackbar('Syncing from GitHub…');
+  setSyncStatus('syncing');
+  const remote = await loadFromGitHub();
+  if (remote) {
+    appData = remote;
+    saveLocal(appData);
+    render();
+    setSyncStatus('ok');
+    showSnackbar('Synced from GitHub');
+  } else {
+    await saveToGitHub(appData);
+    showSnackbar('Local data pushed to gist');
   }
 });
 
@@ -766,8 +778,9 @@ btnClearToken.addEventListener('click', () => {
   clearGhConfig();
   ghTokenInput.value = '';
   ghTokenInput.dataset.hasExisting = '0';
+  ghGistInput.value = '';
   setSyncStatus('');
-  showSnackbar('GitHub token cleared');
+  showSnackbar('GitHub config cleared');
 });
 btnSettings.addEventListener('click', openSettingsModal);
 

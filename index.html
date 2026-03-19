@@ -171,22 +171,18 @@
   <dialog id="settingsModal" class="modal">
     <div class="modal__content">
       <h2 class="modal__title">GitHub Sync</h2>
-      <p class="modal__body">Store your data as <code>data.json</code> in your GitHub repo. Create a fine-grained Personal Access Token with <strong>Contents: Read &amp; Write</strong> for this repo only.</p>
+      <p class="modal__body">Your data is saved to a private GitHub Gist. Create a token with <strong>Gist</strong> scope at github.com/settings/tokens. Leave Gist ID blank to auto-create one.</p>
       <form id="settingsForm">
         <div class="field">
           <label class="field__label" for="ghToken">Personal Access Token</label>
           <input class="field__input" type="password" id="ghToken" placeholder="github_pat_..." autocomplete="off">
         </div>
         <div class="field">
-          <label class="field__label" for="ghRepo">Repository (owner/repo)</label>
-          <input class="field__input" type="text" id="ghRepo" placeholder="samirmaikap/track-expense">
-        </div>
-        <div class="field">
-          <label class="field__label" for="ghFile">Data file path</label>
-          <input class="field__input" type="text" id="ghFile" placeholder="data.json">
+          <label class="field__label" for="ghGist">Gist ID <span style="font-weight:400;opacity:0.6">(leave blank to auto-create)</span></label>
+          <input class="field__input" type="text" id="ghGist" placeholder="e.g. a1b2c3d4e5f6...">
         </div>
         <div class="modal__actions">
-          <button type="button" class="btn btn--text" id="btnClearToken">Clear Token</button>
+          <button type="button" class="btn btn--text" id="btnClearToken">Clear</button>
           <button type="button" class="btn btn--text" id="btnCancelSettings">Cancel</button>
           <button type="submit" class="btn btn--filled">Save &amp; Sync</button>
         </div>
