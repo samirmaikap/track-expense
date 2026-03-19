@@ -754,15 +754,29 @@ body {
   font-size: 18px;
   color: var(--md-on-surface-variant);
   transition: color 0.2s;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.sync-status:hover {
+  background: var(--md-surface-container-high);
 }
 
 .sync-status--syncing {
   color: var(--md-primary);
+}
+
+.sync-status--syncing span {
+  display: block;
   animation: spin 1s linear infinite;
 }
 
 .sync-status--ok {
   color: var(--md-success);
+}
+
+.sync-status--idle {
+  color: var(--md-on-surface-variant);
 }
 
 .sync-status--error {

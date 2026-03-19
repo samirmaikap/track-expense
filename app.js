@@ -62,6 +62,14 @@ async function saveToGitHub(data) {
   if (!token) return false;
   try {
     setSyncStatus('syncing');
+    // Always fetch fresh SHA before writing to avoid 409 conflicts
+    if (!ghFileSha) {
+      const check = await ghFetch(`repos/${repo}/contents/${file}`);
+      if (check.ok) {
+        const checkJson = await check.json();
+        ghFileSha = checkJson.sha;
+      }
+    }
     const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
     const body = {
       message: `Update ${file} – ${new Date().toISOString().slice(0, 10)}`,
@@ -69,6 +77,11 @@ async function saveToGitHub(data) {
       ...(ghFileSha ? { sha: ghFileSha } : {}),
     };
     const res = await ghFetch(`repos/${repo}/contents/${file}`, 'PUT', body);
+    if (res.status === 409) {
+      // SHA conflict – refresh SHA and retry once
+      ghFileSha = null;
+      return saveToGitHub(data);
+    }
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.message || `GitHub ${res.status}`);
@@ -91,17 +104,25 @@ function setSyncStatus(state, tooltip = '') {
   el.className = 'sync-status';
   if (state === 'syncing') {
     el.className = 'sync-status sync-status--syncing';
-    el.innerHTML = '<span class="material-symbols-rounded">sync</span>';
+    el.innerHTML = '<span class="material-symbols-rounded" style="display:block">sync</span>';
     el.title = 'Syncing…';
   } else if (state === 'ok') {
     el.className = 'sync-status sync-status--ok';
     el.innerHTML = '<span class="material-symbols-rounded">cloud_done</span>';
-    el.title = 'Synced to GitHub';
-    setTimeout(() => { el.innerHTML = ''; el.className = 'sync-status'; }, 3000);
+    el.title = 'Synced – click to pull latest';
+    setTimeout(() => {
+      el.innerHTML = '<span class="material-symbols-rounded">cloud_sync</span>';
+      el.className = 'sync-status sync-status--idle';
+      el.title = 'Click to sync now';
+    }, 3000);
   } else if (state === 'error') {
     el.className = 'sync-status sync-status--error';
     el.innerHTML = '<span class="material-symbols-rounded">cloud_off</span>';
-    el.title = tooltip || 'Sync failed';
+    el.title = tooltip || 'Sync failed – click to retry';
+  } else if (state === 'idle') {
+    el.className = 'sync-status sync-status--idle';
+    el.innerHTML = '<span class="material-symbols-rounded">cloud_sync</span>';
+    el.title = 'Click to sync now';
   } else {
     el.innerHTML = '';
   }
@@ -765,13 +786,16 @@ function exportData() {
 
 function importData(file) {
   const reader = new FileReader();
-  reader.onload = (e) => {
+  reader.onload = async (e) => {
     try {
       const imported = JSON.parse(e.target.result);
       if (imported && Array.isArray(imported.categories)) {
         appData = imported;
+        ghFileSha = null; // reset SHA so next save fetches fresh
+        saveLocal(appData);
         render();
-        showSnackbar('Data imported successfully');
+        showSnackbar('Imported – syncing to GitHub…');
+        await saveToGitHub(appData);
       } else {
         showSnackbar('Invalid file format');
       }
@@ -848,6 +872,29 @@ async function init() {
     } else {
       setSyncStatus('error', 'Could not load from GitHub');
     }
+  }
+
+  // Clicking the sync indicator manually triggers a pull then push
+  const syncEl = document.getElementById('syncStatus');
+  if (syncEl) {
+    syncEl.style.cursor = 'pointer';
+    syncEl.addEventListener('click', async () => {
+      const { token } = getGhConfig();
+      if (!token) { openSettingsModal(); return; }
+      setSyncStatus('syncing');
+      showSnackbar('Syncing from GitHub…');
+      const remote = await loadFromGitHub();
+      if (remote) {
+        appData = remote;
+        saveLocal(appData);
+        render();
+        setSyncStatus('ok');
+        showSnackbar('Synced from GitHub');
+      } else {
+        setSyncStatus('error', 'Sync failed');
+        showSnackbar('Sync failed – check your token in Settings');
+      }
+    });
   }
 }
 
