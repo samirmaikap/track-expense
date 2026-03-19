@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Track Expense</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Symbols+Rounded" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Top App Bar -->
+    <header class="top-bar">
+      <h1 class="top-bar__title">Track Expense</h1>
+      <div class="top-bar__actions">
+        <button class="icon-btn" id="btnExport" title="Export Data">
+          <span class="material-symbols-rounded">download</span>
+        </button>
+        <button class="icon-btn" id="btnImport" title="Import Data">
+          <span class="material-symbols-rounded">upload</span>
+        </button>
+        <input type="file" id="fileImport" accept=".json" hidden>
+      </div>
+    </header>
+
+    <!-- Summary Section -->
+    <section class="summary">
+      <div class="summary-card summary-card--total">
+        <span class="material-symbols-rounded summary-card__icon">account_balance_wallet</span>
+        <div class="summary-card__content">
+          <span class="summary-card__label">Total Budget</span>
+          <span class="summary-card__value" id="summaryTotal">₹0</span>
+        </div>
+      </div>
+      <div class="summary-card summary-card--paid">
+        <span class="material-symbols-rounded summary-card__icon">check_circle</span>
+        <div class="summary-card__content">
+          <span class="summary-card__label">Total Paid</span>
+          <span class="summary-card__value" id="summaryPaid">₹0</span>
+        </div>
+      </div>
+      <div class="summary-card summary-card--pending">
+        <span class="material-symbols-rounded summary-card__icon">pending</span>
+        <div class="summary-card__content">
+          <span class="summary-card__label">Pending</span>
+          <span class="summary-card__value" id="summaryPending">₹0</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Chart Section -->
+    <section class="chart-section">
+      <div class="card">
+        <h2 class="card__title">Overview</h2>
+        <div class="chart-container">
+          <canvas id="overviewChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Category Cards -->
+    <section class="categories" id="categoriesContainer">
+      <!-- Cards rendered by JS -->
+    </section>
+
+    <!-- Empty State -->
+    <div class="empty-state" id="emptyState">
+      <span class="material-symbols-rounded empty-state__icon">receipt_long</span>
+      <p class="empty-state__text">No expenses yet. Tap + to add a category.</p>
+    </div>
+
+    <!-- FAB -->
+    <button class="fab" id="btnAddCategory" title="Add Category">
+      <span class="material-symbols-rounded">add</span>
+    </button>
+  </div>
+
+  <!-- Add/Edit Category Modal -->
+  <dialog id="categoryModal" class="modal">
+    <div class="modal__content">
+      <h2 class="modal__title" id="categoryModalTitle">Add Category</h2>
+      <form id="categoryForm">
+        <input type="hidden" id="categoryId">
+        <div class="field">
+          <label class="field__label" for="categoryName">Category Name</label>
+          <input class="field__input" type="text" id="categoryName" placeholder="e.g. Plumber" required>
+        </div>
+        <div class="field">
+          <label class="field__label" for="categoryBudget">Total Budget Amount</label>
+          <input class="field__input" type="number" id="categoryBudget" placeholder="e.g. 50000" min="0" step="any" required>
+        </div>
+        <div class="modal__actions">
+          <button type="button" class="btn btn--text" id="btnCancelCategory">Cancel</button>
+          <button type="submit" class="btn btn--filled">Save</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Add Payment Modal -->
+  <dialog id="paymentModal" class="modal">
+    <div class="modal__content">
+      <h2 class="modal__title">Add Payment</h2>
+      <form id="paymentForm">
+        <input type="hidden" id="paymentCategoryId">
+        <div class="field">
+          <label class="field__label" for="paymentDate">Date</label>
+          <input class="field__input" type="date" id="paymentDate" required>
+        </div>
+        <div class="field">
+          <label class="field__label" for="paymentLabel">Label</label>
+          <input class="field__input" type="text" id="paymentLabel" placeholder="e.g. Initial advance" required>
+        </div>
+        <div class="field">
+          <label class="field__label" for="paymentAmount">Amount</label>
+          <input class="field__input" type="number" id="paymentAmount" placeholder="e.g. 5000" min="0" step="any" required>
+        </div>
+        <div class="modal__actions">
+          <button type="button" class="btn btn--text" id="btnCancelPayment">Cancel</button>
+          <button type="submit" class="btn btn--filled">Add Payment</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Confirm Delete Modal -->
+  <dialog id="confirmModal" class="modal">
+    <div class="modal__content">
+      <h2 class="modal__title">Confirm Delete</h2>
+      <p class="modal__body" id="confirmMessage">Are you sure?</p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--text" id="btnConfirmCancel">Cancel</button>
+        <button type="button" class="btn btn--danger" id="btnConfirmOk">Delete</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Detail View Modal (for viewing all entries) -->
+  <dialog id="detailModal" class="modal modal--full">
+    <div class="modal__content modal__content--full">
+      <div class="detail-header">
+        <button class="icon-btn" id="btnDetailBack">
+          <span class="material-symbols-rounded">arrow_back</span>
+        </button>
+        <h2 class="modal__title" id="detailTitle">Category</h2>
+        <div class="detail-header__actions">
+          <button class="icon-btn" id="btnEditCategory" title="Edit Category">
+            <span class="material-symbols-rounded">edit</span>
+          </button>
+          <button class="icon-btn" id="btnDeleteCategory" title="Delete Category">
+            <span class="material-symbols-rounded">delete</span>
+          </button>
+        </div>
+      </div>
+      <div class="detail-summary" id="detailSummary"></div>
+      <div class="detail-chart">
+        <canvas id="detailChart"></canvas>
+      </div>
+      <div class="detail-entries" id="detailEntries"></div>
+    </div>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
