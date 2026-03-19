@@ -170,16 +170,16 @@
   <!-- Settings Modal -->
   <dialog id="settingsModal" class="modal">
     <div class="modal__content">
-      <h2 class="modal__title">GitHub Sync</h2>
-      <p class="modal__body">Your data is saved to a private GitHub Gist. Create a token with <strong>Gist</strong> scope at github.com/settings/tokens. Leave Gist ID blank to auto-create one.</p>
+      <h2 class="modal__title">JSONBin Sync</h2>
+      <p class="modal__body">Your data is saved to a private <a href="https://jsonbin.io" target="_blank" rel="noopener">JSONBin</a> bin. Get a free Master Key from jsonbin.io. Leave Bin ID blank to auto-create one.</p>
       <form id="settingsForm">
         <div class="field">
-          <label class="field__label" for="ghToken">Personal Access Token</label>
-          <input class="field__input" type="password" id="ghToken" placeholder="github_pat_..." autocomplete="off">
+          <label class="field__label" for="jbKey">Master Key</label>
+          <input class="field__input" type="password" id="jbKey" placeholder="$2a$10$..." autocomplete="off">
         </div>
         <div class="field">
-          <label class="field__label" for="ghGist">Gist ID <span style="font-weight:400;opacity:0.6">(leave blank to auto-create)</span></label>
-          <input class="field__input" type="text" id="ghGist" placeholder="e.g. a1b2c3d4e5f6...">
+          <label class="field__label" for="jbBin">Bin ID <span style="font-weight:400;opacity:0.6">(leave blank to auto-create)</span></label>
+          <input class="field__input" type="text" id="jbBin" placeholder="e.g. 64a1b2c3d4e5f6...">
         </div>
         <div class="modal__actions">
           <button type="button" class="btn btn--text" id="btnClearToken">Clear</button>

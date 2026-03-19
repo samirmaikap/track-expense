@@ -1,99 +1,87 @@
 // ===== Storage Keys =====
-const STORAGE_KEY  = 'track-expense-data';
-const GH_TOKEN_KEY = 'track-expense-gh-token';
-const GH_GIST_KEY  = 'track-expense-gh-gist';
-const GIST_FILENAME = 'track-expense-data.json';
+const STORAGE_KEY     = 'track-expense-data';
+const JB_KEY_KEY      = 'track-expense-jb-key';
+const JB_BIN_KEY      = 'track-expense-jb-bin';
+const JSONBIN_BASE    = 'https://api.jsonbin.io/v3';
 
-// ===== GitHub Gist Config =====
-function getGhConfig() {
+// ===== JSONBin Config =====
+function getJbConfig() {
   return {
-    token:  localStorage.getItem(GH_TOKEN_KEY) || '',
-    gistId: localStorage.getItem(GH_GIST_KEY)  || '',
+    apiKey: localStorage.getItem(JB_KEY_KEY) || '',
+    binId:  localStorage.getItem(JB_BIN_KEY) || '',
   };
 }
 
-function saveGhConfig(token, gistId) {
-  localStorage.setItem(GH_TOKEN_KEY, token);
-  localStorage.setItem(GH_GIST_KEY,  gistId);
+function saveJbConfig(apiKey, binId) {
+  localStorage.setItem(JB_KEY_KEY, apiKey);
+  localStorage.setItem(JB_BIN_KEY, binId);
 }
 
-function clearGhConfig() {
-  localStorage.removeItem(GH_TOKEN_KEY);
-  localStorage.removeItem(GH_GIST_KEY);
+function clearJbConfig() {
+  localStorage.removeItem(JB_KEY_KEY);
+  localStorage.removeItem(JB_BIN_KEY);
 }
 
-// ===== Gist API  (no SHA – just GET/PATCH) =====
-async function gistFetch(gistId, method = 'GET', body = null) {
-  const { token } = getGhConfig();
-  const headers = { 'Accept': 'application/vnd.github.v3+json' };
-  if (token) headers['Authorization'] = `token ${token}`;
-  const opts = { method, headers };
-  if (body) {
-    headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
-  }
-  return fetch(`https://api.github.com/gists/${gistId}`, opts);
-}
-
-async function loadFromGitHub() {
-  const { token, gistId } = getGhConfig();
-  if (!token || !gistId) return null;
+// ===== JSONBin API =====
+async function loadFromCloud() {
+  const { apiKey, binId } = getJbConfig();
+  if (!apiKey || !binId) return null;
   try {
-    const res = await gistFetch(gistId);
-    if (!res.ok) throw new Error(`Gist GET ${res.status}`);
+    const res = await fetch(`${JSONBIN_BASE}/b/${binId}/latest`, {
+      headers: { 'X-Master-Key': apiKey },
+    });
+    if (!res.ok) throw new Error(`JSONBin GET ${res.status}`);
     const json = await res.json();
-    const file = json.files[GIST_FILENAME];
-    if (!file) return { categories: [] };
-    // Use raw_url for content if truncated
-    const content = file.truncated
-      ? await (await fetch(file.raw_url)).text()
-      : file.content;
-    return JSON.parse(content);
+    return json.record;
   } catch (err) {
-    console.error('Gist load failed:', err);
+    console.error('JSONBin load failed:', err);
     return null;
   }
 }
 
-async function saveToGitHub(data) {
-  const { token, gistId } = getGhConfig();
-  if (!token || !gistId) return false;
+async function saveToCloud(data) {
+  const { apiKey, binId } = getJbConfig();
+  if (!apiKey || !binId) return false;
   try {
     setSyncStatus('syncing');
-    const res = await gistFetch(gistId, 'PATCH', {
-      files: { [GIST_FILENAME]: { content: JSON.stringify(data, null, 2) } },
+    const res = await fetch(`${JSONBIN_BASE}/b/${binId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': apiKey,
+      },
+      body: JSON.stringify(data),
     });
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.message || `Gist PATCH ${res.status}`);
+      throw new Error(err.message || `JSONBin PUT ${res.status}`);
     }
     setSyncStatus('ok');
     return true;
   } catch (err) {
-    console.error('Gist save failed:', err);
+    console.error('JSONBin save failed:', err);
     setSyncStatus('error', err.message);
     return false;
   }
 }
 
-// Auto-create a gist if the user has a token but no gist ID yet
-async function createGist(token) {
-  const res = await fetch('https://api.github.com/gists', {
+async function createBin(apiKey) {
+  const res = await fetch(`${JSONBIN_BASE}/b`, {
     method: 'POST',
     headers: {
-      'Accept': 'application/vnd.github.v3+json',
-      'Authorization': `token ${token}`,
       'Content-Type': 'application/json',
+      'X-Master-Key': apiKey,
+      'X-Bin-Name': 'track-expense',
+      'X-Bin-Private': 'true',
     },
-    body: JSON.stringify({
-      description: 'Track Expense data',
-      public: false,
-      files: { [GIST_FILENAME]: { content: JSON.stringify({ categories: [] }, null, 2) } },
-    }),
+    body: JSON.stringify({ categories: [] }),
   });
-  if (!res.ok) throw new Error(`Could not create gist: ${res.status}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `Could not create bin: ${res.status}`);
+  }
   const json = await res.json();
-  return json.id;
+  return json.metadata.id;
 }
 
 // ===== Sync Status Indicator =====
@@ -145,7 +133,7 @@ let saveTimer = null;
 function scheduleSave() {
   saveLocal(appData);
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => saveToGitHub(appData), 1200);
+  saveTimer = setTimeout(() => saveToCloud(appData), 1200);
 }
 
 function generateId() {
@@ -714,73 +702,70 @@ function showSnackbar(message) {
 }
 
 // ===== Settings Modal =====
-const settingsModal = $('#settingsModal');
-const settingsForm = $('#settingsForm');
-const ghTokenInput = $('#ghToken');
-const ghGistInput = $('#ghGist');
-const btnSettings = $('#btnSettings');
+const settingsModal   = $('#settingsModal');
+const settingsForm    = $('#settingsForm');
+const jbKeyInput      = $('#jbKey');
+const jbBinInput      = $('#jbBin');
+const btnSettings     = $('#btnSettings');
 const btnCancelSettings = $('#btnCancelSettings');
-const btnClearToken = $('#btnClearToken');
+const btnClearToken   = $('#btnClearToken');
 
 function openSettingsModal() {
-  const cfg = getGhConfig();
-  ghTokenInput.value = cfg.token ? '••••••••' : '';
-  ghTokenInput.dataset.hasExisting = cfg.token ? '1' : '0';
-  ghGistInput.value = cfg.gistId;
+  const cfg = getJbConfig();
+  jbKeyInput.value = cfg.apiKey ? '••••••••' : '';
+  jbKeyInput.dataset.hasExisting = cfg.apiKey ? '1' : '0';
+  jbBinInput.value = cfg.binId;
   settingsModal.showModal();
 }
 
 settingsForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const tokenVal = ghTokenInput.value.trim();
-  const gistVal  = ghGistInput.value.trim();
-  const existing = localStorage.getItem(GH_TOKEN_KEY) || '';
-  const token = (tokenVal === '••••••••' && ghTokenInput.dataset.hasExisting === '1') ? existing : tokenVal;
+  const keyVal = jbKeyInput.value.trim();
+  const binVal = jbBinInput.value.trim();
+  const existing = localStorage.getItem(JB_KEY_KEY) || '';
+  const apiKey = (keyVal === '••••••••' && jbKeyInput.dataset.hasExisting === '1') ? existing : keyVal;
 
-  let gistId = gistVal;
+  let binId = binVal;
   settingsModal.close();
+  if (!apiKey) return;
 
-  if (!token) return;
-
-  // Auto-create gist if none provided
-  if (!gistId) {
+  if (!binId) {
     try {
-      showSnackbar('Creating gist…');
+      showSnackbar('Creating bin…');
       setSyncStatus('syncing');
-      gistId = await createGist(token);
-      showSnackbar('Gist created!');
+      binId = await createBin(apiKey);
+      showSnackbar('Bin created!');
     } catch (err) {
-      showSnackbar('Could not create gist: ' + err.message);
+      showSnackbar('Could not create bin: ' + err.message);
       setSyncStatus('error', err.message);
       return;
     }
   }
 
-  saveGhConfig(token, gistId);
-
-  showSnackbar('Syncing from GitHub…');
+  saveJbConfig(apiKey, binId);
+  showSnackbar('Syncing…');
   setSyncStatus('syncing');
-  const remote = await loadFromGitHub();
+  const remote = await loadFromCloud();
   if (remote) {
     appData = remote;
     saveLocal(appData);
     render();
     setSyncStatus('ok');
-    showSnackbar('Synced from GitHub');
+    showSnackbar('Synced from JSONBin');
   } else {
-    await saveToGitHub(appData);
-    showSnackbar('Local data pushed to gist');
+    await saveToCloud(appData);
+    showSnackbar('Local data pushed to bin');
   }
 });
 
 btnCancelSettings.addEventListener('click', () => settingsModal.close());
 btnClearToken.addEventListener('click', () => {
-  clearGhConfig();
-  ghTokenInput.value = '';
-  ghTokenInput.dataset.hasExisting = '0';
-  ghGistInput.value = '';
+  clearJbConfig();
+  jbKeyInput.value = '';
+  jbKeyInput.dataset.hasExisting = '0';
+  jbBinInput.value = '';
   setSyncStatus('');
-  showSnackbar('GitHub config cleared');
+  showSnackbar('JSONBin config cleared');
 });
 btnSettings.addEventListener('click', openSettingsModal);
 
@@ -804,11 +789,10 @@ function importData(file) {
       const imported = JSON.parse(e.target.result);
       if (imported && Array.isArray(imported.categories)) {
         appData = imported;
-        ghFileSha = null; // reset SHA so next save fetches fresh
         saveLocal(appData);
         render();
-        showSnackbar('Imported – syncing to GitHub…');
-        await saveToGitHub(appData);
+        showSnackbar('Imported – syncing…');
+        await saveToCloud(appData);
       } else {
         showSnackbar('Invalid file format');
       }
@@ -872,40 +856,39 @@ fileImport.addEventListener('change', (e) => {
 
 // ===== Init =====
 async function init() {
-  render(); // show local data immediately
-  const { token } = getGhConfig();
-  if (token) {
+  render();
+  const { apiKey, binId } = getJbConfig();
+  if (apiKey && binId) {
     setSyncStatus('syncing');
-    const remote = await loadFromGitHub();
+    const remote = await loadFromCloud();
     if (remote) {
       appData = remote;
       saveLocal(appData);
       render();
       setSyncStatus('ok');
     } else {
-      setSyncStatus('error', 'Could not load from GitHub');
+      setSyncStatus('error', 'Could not load from JSONBin');
     }
   }
 
-  // Clicking the sync indicator manually triggers a pull then push
   const syncEl = document.getElementById('syncStatus');
   if (syncEl) {
     syncEl.style.cursor = 'pointer';
     syncEl.addEventListener('click', async () => {
-      const { token } = getGhConfig();
-      if (!token) { openSettingsModal(); return; }
+      const { apiKey, binId } = getJbConfig();
+      if (!apiKey || !binId) { openSettingsModal(); return; }
       setSyncStatus('syncing');
-      showSnackbar('Syncing from GitHub…');
-      const remote = await loadFromGitHub();
+      showSnackbar('Syncing…');
+      const remote = await loadFromCloud();
       if (remote) {
         appData = remote;
         saveLocal(appData);
         render();
         setSyncStatus('ok');
-        showSnackbar('Synced from GitHub');
+        showSnackbar('Synced from JSONBin');
       } else {
         setSyncStatus('error', 'Sync failed');
-        showSnackbar('Sync failed – check your token in Settings');
+        showSnackbar('Sync failed – check your API key in Settings');
       }
     });
   }
