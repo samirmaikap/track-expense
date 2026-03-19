@@ -1,18 +1,131 @@
-// ===== Data Store =====
+// ===== Storage Keys =====
 const STORAGE_KEY = 'track-expense-data';
+const GH_TOKEN_KEY = 'track-expense-gh-token';
+const GH_REPO_KEY  = 'track-expense-gh-repo';
+const GH_FILE_KEY  = 'track-expense-gh-file';
 
-function loadData() {
+// ===== GitHub Config =====
+function getGhConfig() {
+  return {
+    token: localStorage.getItem(GH_TOKEN_KEY) || '',
+    repo:  localStorage.getItem(GH_REPO_KEY)  || 'samirmaikap/track-expense',
+    file:  localStorage.getItem(GH_FILE_KEY)  || 'data.json',
+  };
+}
+
+function saveGhConfig(token, repo, file) {
+  localStorage.setItem(GH_TOKEN_KEY, token);
+  localStorage.setItem(GH_REPO_KEY,  repo);
+  localStorage.setItem(GH_FILE_KEY,  file);
+}
+
+function clearGhConfig() {
+  localStorage.removeItem(GH_TOKEN_KEY);
+}
+
+// ===== GitHub API =====
+let ghFileSha = null; // SHA of the remote data.json, needed for updates
+
+async function ghFetch(path, method = 'GET', body = null) {
+  const { token } = getGhConfig();
+  const headers = {
+    'Accept': 'application/vnd.github.v3+json',
+  };
+  if (token) headers['Authorization'] = `token ${token}`;
+  const opts = { method, headers };
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  return fetch(`https://api.github.com/${path}`, opts);
+}
+
+async function loadFromGitHub() {
+  const { token, repo, file } = getGhConfig();
+  if (!token) return null;
+  try {
+    const res = await ghFetch(`repos/${repo}/contents/${file}`);
+    if (res.status === 404) return { categories: [] }; // file not yet created
+    if (!res.ok) throw new Error(`GitHub ${res.status}`);
+    const json = await res.json();
+    ghFileSha = json.sha;
+    const decoded = JSON.parse(atob(json.content.replace(/\n/g, '')));
+    return decoded;
+  } catch (err) {
+    console.error('GitHub load failed:', err);
+    return null;
+  }
+}
+
+async function saveToGitHub(data) {
+  const { token, repo, file } = getGhConfig();
+  if (!token) return false;
+  try {
+    setSyncStatus('syncing');
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
+    const body = {
+      message: `Update ${file} – ${new Date().toISOString().slice(0, 10)}`,
+      content,
+      ...(ghFileSha ? { sha: ghFileSha } : {}),
+    };
+    const res = await ghFetch(`repos/${repo}/contents/${file}`, 'PUT', body);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.message || `GitHub ${res.status}`);
+    }
+    const json = await res.json();
+    ghFileSha = json.content.sha;
+    setSyncStatus('ok');
+    return true;
+  } catch (err) {
+    console.error('GitHub save failed:', err);
+    setSyncStatus('error', err.message);
+    return false;
+  }
+}
+
+// ===== Sync Status Indicator =====
+function setSyncStatus(state, tooltip = '') {
+  const el = document.getElementById('syncStatus');
+  if (!el) return;
+  el.className = 'sync-status';
+  if (state === 'syncing') {
+    el.className = 'sync-status sync-status--syncing';
+    el.innerHTML = '<span class="material-symbols-rounded">sync</span>';
+    el.title = 'Syncing…';
+  } else if (state === 'ok') {
+    el.className = 'sync-status sync-status--ok';
+    el.innerHTML = '<span class="material-symbols-rounded">cloud_done</span>';
+    el.title = 'Synced to GitHub';
+    setTimeout(() => { el.innerHTML = ''; el.className = 'sync-status'; }, 3000);
+  } else if (state === 'error') {
+    el.className = 'sync-status sync-status--error';
+    el.innerHTML = '<span class="material-symbols-rounded">cloud_off</span>';
+    el.title = tooltip || 'Sync failed';
+  } else {
+    el.innerHTML = '';
+  }
+}
+
+// ===== Local Storage Fallback =====
+function loadLocal() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
-  } catch {
-    // ignore parse errors
-  }
+  } catch { /* ignore */ }
   return { categories: [] };
 }
 
-function saveData(data) {
+function saveLocal(data) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+// ===== Debounced Save =====
+let saveTimer = null;
+function scheduleSave() {
+  saveLocal(appData);
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => saveToGitHub(appData), 1200);
 }
 
 function generateId() {
@@ -20,7 +133,7 @@ function generateId() {
 }
 
 // ===== State =====
-let appData = loadData();
+let appData = loadLocal(); // start with local immediately
 let overviewChart = null;
 let detailChart = null;
 let confirmCallback = null;
@@ -114,7 +227,7 @@ function render() {
   renderSummary();
   renderCategories();
   renderOverviewChart();
-  saveData(appData);
+  scheduleSave();
 }
 
 function renderSummary() {
@@ -580,6 +693,63 @@ function showSnackbar(message) {
   setTimeout(() => el.classList.remove('snackbar--visible'), 2500);
 }
 
+// ===== Settings Modal =====
+const settingsModal = $('#settingsModal');
+const settingsForm = $('#settingsForm');
+const ghTokenInput = $('#ghToken');
+const ghRepoInput = $('#ghRepo');
+const ghFileInput = $('#ghFile');
+const btnSettings = $('#btnSettings');
+const btnCancelSettings = $('#btnCancelSettings');
+const btnClearToken = $('#btnClearToken');
+
+function openSettingsModal() {
+  const cfg = getGhConfig();
+  ghTokenInput.value = cfg.token ? '••••••••' : '';
+  ghTokenInput.dataset.hasExisting = cfg.token ? '1' : '0';
+  ghRepoInput.value = cfg.repo;
+  ghFileInput.value = cfg.file;
+  settingsModal.showModal();
+}
+
+settingsForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tokenVal = ghTokenInput.value.trim();
+  const repo = ghRepoInput.value.trim();
+  const file = ghFileInput.value.trim() || 'data.json';
+  // If user didn't change the masked token, keep existing
+  const existing = localStorage.getItem(GH_TOKEN_KEY) || '';
+  const token = (tokenVal === '••••••••' && ghTokenInput.dataset.hasExisting === '1') ? existing : tokenVal;
+  saveGhConfig(token, repo, file);
+  settingsModal.close();
+  if (token) {
+    showSnackbar('Syncing from GitHub…');
+    setSyncStatus('syncing');
+    const remote = await loadFromGitHub();
+    if (remote) {
+      appData = remote;
+      saveLocal(appData);
+      render();
+      setSyncStatus('ok');
+      showSnackbar('Synced from GitHub');
+    } else {
+      // Push local data to GitHub
+      await saveToGitHub(appData);
+      showSnackbar('Local data pushed to GitHub');
+    }
+  }
+});
+
+btnCancelSettings.addEventListener('click', () => settingsModal.close());
+btnClearToken.addEventListener('click', () => {
+  clearGhConfig();
+  ghTokenInput.value = '';
+  ghTokenInput.dataset.hasExisting = '0';
+  setSyncStatus('');
+  showSnackbar('GitHub token cleared');
+});
+btnSettings.addEventListener('click', openSettingsModal);
+
 // ===== Export / Import =====
 function exportData() {
   const json = JSON.stringify(appData, null, 2);
@@ -651,7 +821,7 @@ fileImport.addEventListener('change', (e) => {
 });
 
 // Close modals on backdrop click
-[categoryModal, paymentModal, confirmModal, detailModal].forEach(modal => {
+[categoryModal, paymentModal, confirmModal, detailModal, settingsModal].forEach(modal => {
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
       modal.close();
@@ -664,4 +834,21 @@ fileImport.addEventListener('change', (e) => {
 });
 
 // ===== Init =====
-render();
+async function init() {
+  render(); // show local data immediately
+  const { token } = getGhConfig();
+  if (token) {
+    setSyncStatus('syncing');
+    const remote = await loadFromGitHub();
+    if (remote) {
+      appData = remote;
+      saveLocal(appData);
+      render();
+      setSyncStatus('ok');
+    } else {
+      setSyncStatus('error', 'Could not load from GitHub');
+    }
+  }
+}
+
+init();

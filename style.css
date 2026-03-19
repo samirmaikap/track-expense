@@ -744,6 +744,36 @@ body {
   }
 }
 
+/* ===== Sync Status ===== */
+.sync-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  color: var(--md-on-surface-variant);
+  transition: color 0.2s;
+}
+
+.sync-status--syncing {
+  color: var(--md-primary);
+  animation: spin 1s linear infinite;
+}
+
+.sync-status--ok {
+  color: var(--md-success);
+}
+
+.sync-status--error {
+  color: var(--md-danger);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* ===== Snackbar ===== */
 .snackbar {
   position: fixed;

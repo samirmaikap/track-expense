@@ -16,6 +16,7 @@
     <header class="top-bar">
       <h1 class="top-bar__title">Track Expense</h1>
       <div class="top-bar__actions">
+        <div class="sync-status" id="syncStatus" title="Sync status"></div>
         <button class="icon-btn" id="btnExport" title="Export Data">
           <span class="material-symbols-rounded">download</span>
         </button>
@@ -23,6 +24,9 @@
           <span class="material-symbols-rounded">upload</span>
         </button>
         <input type="file" id="fileImport" accept=".json" hidden>
+        <button class="icon-btn" id="btnSettings" title="GitHub Sync Settings">
+          <span class="material-symbols-rounded">settings</span>
+        </button>
       </div>
     </header>
 
@@ -160,6 +164,33 @@
         <canvas id="detailChart"></canvas>
       </div>
       <div class="detail-entries" id="detailEntries"></div>
+    </div>
+  </dialog>
+
+  <!-- Settings Modal -->
+  <dialog id="settingsModal" class="modal">
+    <div class="modal__content">
+      <h2 class="modal__title">GitHub Sync</h2>
+      <p class="modal__body">Store your data as <code>data.json</code> in your GitHub repo. Create a fine-grained Personal Access Token with <strong>Contents: Read &amp; Write</strong> for this repo only.</p>
+      <form id="settingsForm">
+        <div class="field">
+          <label class="field__label" for="ghToken">Personal Access Token</label>
+          <input class="field__input" type="password" id="ghToken" placeholder="github_pat_..." autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field__label" for="ghRepo">Repository (owner/repo)</label>
+          <input class="field__input" type="text" id="ghRepo" placeholder="samirmaikap/track-expense">
+        </div>
+        <div class="field">
+          <label class="field__label" for="ghFile">Data file path</label>
+          <input class="field__input" type="text" id="ghFile" placeholder="data.json">
+        </div>
+        <div class="modal__actions">
+          <button type="button" class="btn btn--text" id="btnClearToken">Clear Token</button>
+          <button type="button" class="btn btn--text" id="btnCancelSettings">Cancel</button>
+          <button type="submit" class="btn btn--filled">Save &amp; Sync</button>
+        </div>
+      </form>
     </div>
   </dialog>
 
