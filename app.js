@@ -6,9 +6,11 @@ const JSONBIN_BASE    = 'https://api.jsonbin.io/v3';
 
 // ===== JSONBin Config =====
 function getJbConfig() {
+  const env = window.APP_CONFIG || {};
   return {
-    apiKey: localStorage.getItem(JB_KEY_KEY) || '',
-    binId:  localStorage.getItem(JB_BIN_KEY) || '',
+    // localStorage overrides injected env (allows per-device override via Settings)
+    apiKey: localStorage.getItem(JB_KEY_KEY) || env.jsonbinKey || '',
+    binId:  localStorage.getItem(JB_BIN_KEY) || env.jsonbinBin || '',
   };
 }
 
@@ -711,10 +713,15 @@ const btnCancelSettings = $('#btnCancelSettings');
 const btnClearToken   = $('#btnClearToken');
 
 function openSettingsModal() {
-  const cfg = getJbConfig();
-  jbKeyInput.value = cfg.apiKey ? '••••••••' : '';
-  jbKeyInput.dataset.hasExisting = cfg.apiKey ? '1' : '0';
-  jbBinInput.value = cfg.binId;
+  const env = window.APP_CONFIG || {};
+  const storedKey = localStorage.getItem(JB_KEY_KEY) || '';
+  const storedBin = localStorage.getItem(JB_BIN_KEY) || '';
+  // Show placeholder when key comes from injected env
+  jbKeyInput.value = storedKey ? '••••••••' : '';
+  jbKeyInput.placeholder = env.jsonbinKey ? '(injected from GitHub secret)' : '$2a$10$...';
+  jbKeyInput.dataset.hasExisting = storedKey ? '1' : '0';
+  jbBinInput.value = storedBin || env.jsonbinBin || '';
+  jbBinInput.placeholder = env.jsonbinBin ? '(injected from GitHub secret)' : 'e.g. 64a1b2c3d4e5f6...';
   settingsModal.showModal();
 }
 
