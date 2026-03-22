@@ -23,20 +23,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Inject runtime config
         run: |
-          cat > config.js << 'CONFIGEOF'
+          mkdir -p public
+          cat > public/config.js << 'CONFIGEOF'
           window.APP_CONFIG = {
-            jsonbinKey: "${{ secrets.JSONBIN_MASTER_KEY }}",
-            jsonbinBin: "${{ secrets.JSONBIN_BIN_ID }}"
+            supabaseUrl: "${{ secrets.SUPABASE_URL }}",
+            supabaseKey: "${{ secrets.SUPABASE_ANON_KEY }}"
           };
           CONFIGEOF
+
+      - name: Build
+        run: npm run build
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: dist
 
       - uses: actions/deploy-pages@v4
         id: deployment
