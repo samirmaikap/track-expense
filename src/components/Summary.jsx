@@ -4,25 +4,25 @@ export default function Summary({ categories }) {
   const { total, paid, pending } = getTotals(categories)
   return (
     <section className="summary">
-      <div className="summary-card summary-card--total">
-        <span className="material-symbols-rounded summary-card__icon">account_balance_wallet</span>
-        <div className="summary-card__content">
-          <span className="summary-card__label">Total Budget</span>
-          <span className="summary-card__value">{formatCurrency(total)}</span>
+      <div className="summary-stat summary-stat--budget">
+        <span className="summary-stat__icon material-symbols-rounded">savings</span>
+        <div className="summary-stat__body">
+          <span className="summary-stat__label">Budget</span>
+          <span className="summary-stat__value">{formatCurrency(total)}</span>
         </div>
       </div>
-      <div className="summary-card summary-card--paid">
-        <span className="material-symbols-rounded summary-card__icon">check_circle</span>
-        <div className="summary-card__content">
-          <span className="summary-card__label">Total Paid</span>
-          <span className="summary-card__value">{formatCurrency(paid)}</span>
+      <div className="summary-stat summary-stat--paid">
+        <span className="summary-stat__icon material-symbols-rounded">done_all</span>
+        <div className="summary-stat__body">
+          <span className="summary-stat__label">Paid</span>
+          <span className="summary-stat__value">{formatCurrency(paid)}</span>
         </div>
       </div>
-      <div className="summary-card summary-card--pending">
-        <span className="material-symbols-rounded summary-card__icon">pending</span>
-        <div className="summary-card__content">
-          <span className="summary-card__label">Pending</span>
-          <span className="summary-card__value">{formatCurrency(pending)}</span>
+      <div className="summary-stat summary-stat--pending">
+        <span className="summary-stat__icon material-symbols-rounded">hourglass_empty</span>
+        <div className="summary-stat__body">
+          <span className="summary-stat__label">Pending</span>
+          <span className="summary-stat__value">{formatCurrency(pending)}</span>
         </div>
       </div>
     </section>

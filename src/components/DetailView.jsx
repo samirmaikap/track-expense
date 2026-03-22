@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Chart, LineController, LineElement, PointElement, CategoryScale, LinearScale, Filler, Tooltip, Legend } from 'chart.js'
+import { Chart, BarController, BarElement, CategoryScale, LinearScale, Tooltip } from 'chart.js'
 import { getCategoryPaid, formatCurrency, formatDate } from '../utils'
 
-Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Filler, Tooltip, Legend)
+Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip)
 
 function DetailChart({ category }) {
   const canvasRef = useRef(null)
@@ -21,94 +21,72 @@ function DetailChart({ category }) {
       return
     }
 
-    let cumulative = 0
-    const labels = entries.map(e => formatDate(e.date))
-    const cumulativeData = entries.map(e => { cumulative += Number(e.amount); return cumulative })
-    const hasBudget = category.budget !== null && category.budget !== undefined
-    const budgetLine = hasBudget ? entries.map(() => Number(category.budget)) : null
+    const labels = entries.map(e => e.label || formatDate(e.date))
+    const data = entries.map(e => Number(e.amount))
 
-    const datasets = [
-      {
-        label: 'Cumulative Paid',
-        data: cumulativeData,
-        borderColor: '#5b5bd6',
-        backgroundColor: 'rgba(91, 91, 214, 0.1)',
-        fill: true,
-        tension: 0.3,
-        pointRadius: 4,
-        pointBackgroundColor: '#5b5bd6',
-        borderWidth: 2,
-      },
-    ]
-
-    if (budgetLine) {
-      datasets.push({
-        label: 'Budget',
-        data: budgetLine,
-        borderColor: '#d93b3b',
-        borderDash: [6, 4],
-        borderWidth: 1.5,
-        pointRadius: 0,
-        fill: false,
-      })
+    const chartData = {
+      labels,
+      datasets: [
+        {
+          data,
+          backgroundColor: 'rgba(79, 70, 229, 0.8)',
+          hoverBackgroundColor: 'rgba(79, 70, 229, 1)',
+          borderRadius: 6,
+          borderSkipped: false,
+          barPercentage: 0.55,
+        },
+      ],
     }
 
-    const data = { labels, datasets }
+    const options = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: ctx => ' ' + formatCurrency(ctx.raw) },
+          backgroundColor: '#1e1b4b',
+          cornerRadius: 8,
+          padding: 10,
+          titleFont: { family: "'Inter', sans-serif", size: 12 },
+          bodyFont: { family: "'Inter', sans-serif", size: 13 },
+          displayColors: false,
+        },
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { display: false },
+          ticks: { font: { family: "'Inter', sans-serif", size: 11 }, color: '#5a5a7a', maxRotation: 30 },
+        },
+        y: {
+          grid: { color: 'rgba(0,0,0,0.05)' },
+          border: { display: false },
+          ticks: {
+            font: { family: "'Inter', sans-serif", size: 11 },
+            color: '#5a5a7a',
+            callback: val => '₹' + Number(val).toLocaleString('en-IN'),
+          },
+          beginAtZero: true,
+        },
+      },
+    }
 
     if (chartRef.current) {
-      chartRef.current.data = data
+      chartRef.current.data = chartData
       chartRef.current.update()
     } else {
-      chartRef.current = new Chart(canvas, {
-        type: 'line',
-        data,
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              display: true,
-              position: 'bottom',
-              labels: {
-                usePointStyle: true,
-                pointStyle: 'circle',
-                padding: 12,
-                font: { family: "'Inter', sans-serif", size: 11 },
-              },
-            },
-            tooltip: {
-              callbacks: { label: ctx => `${ctx.dataset.label}: ${formatCurrency(ctx.raw)}` },
-              backgroundColor: '#1a1a2e',
-              cornerRadius: 8,
-              padding: 10,
-            },
-          },
-          scales: {
-            x: {
-              grid: { display: false },
-              ticks: { font: { family: "'Inter', sans-serif", size: 10 }, maxRotation: 45 },
-            },
-            y: {
-              grid: { color: 'rgba(0,0,0,0.04)' },
-              ticks: {
-                font: { family: "'Inter', sans-serif", size: 11 },
-                callback: val => '₹' + Number(val).toLocaleString('en-IN'),
-              },
-              beginAtZero: true,
-            },
-          },
-        },
-      })
+      chartRef.current = new Chart(canvas, { type: 'bar', data: chartData, options })
     }
   }, [category])
 
   useEffect(() => () => { chartRef.current?.destroy(); chartRef.current = null }, [])
 
-  const hasEntries = (category.entries || []).length > 0
-  if (!hasEntries) return null
+  if (!(category.entries || []).length) return null
 
   return (
     <div className="detail-chart">
+      <p className="detail-chart__title">Payments</p>
       <canvas ref={canvasRef} />
     </div>
   )
@@ -139,65 +117,65 @@ export default function DetailView({ category, onClose, onEdit, onDelete, onAddP
           </button>
           <h2 className="modal__title">{category.name}</h2>
           <div className="detail-header__actions">
-            <button className="icon-btn" onClick={onEdit} title="Edit Category">
+            <button className="icon-btn" onClick={onEdit} title="Edit">
               <span className="material-symbols-rounded">edit</span>
             </button>
-            <button className="icon-btn" onClick={onDelete} title="Delete Category">
+            <button className="icon-btn icon-btn--danger" onClick={onDelete} title="Delete">
               <span className="material-symbols-rounded">delete</span>
             </button>
           </div>
         </div>
 
         {/* Stats */}
-        <div className="detail-summary">
-          {hasBudget ? (
-            <>
-              <div className="detail-stat">
-                <div className="detail-stat__label">Budget</div>
-                <div className="detail-stat__value">{formatCurrency(budget)}</div>
+        <div className="detail-stats">
+          <div className="detail-stats__row">
+            {hasBudget && (
+              <div className="detail-stat-item">
+                <span className="detail-stat-item__value">{formatCurrency(budget)}</span>
+                <span className="detail-stat-item__label">Budget</span>
               </div>
-              <div className="detail-stat">
-                <div className="detail-stat__label">Paid ({pct}%)</div>
-                <div className="detail-stat__value">{formatCurrency(paid)}</div>
-              </div>
-              <div className="detail-stat">
-                <div className="detail-stat__label">Remaining</div>
-                <div className="detail-stat__value">{formatCurrency(remaining)}</div>
-              </div>
-              <div className="detail-stat">
-                <div className="detail-stat__label">Entries</div>
-                <div className="detail-stat__value">{entries.length}</div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="detail-stat">
-                <div className="detail-stat__label">Total Paid</div>
-                <div className="detail-stat__value">{formatCurrency(paid)}</div>
-              </div>
-              <div className="detail-stat">
-                <div className="detail-stat__label">Entries</div>
-                <div className="detail-stat__value">{entries.length}</div>
-              </div>
-            </>
-          )}
-          {category.description && (
-            <div className="detail-stat detail-stat--full">
-              <div className="detail-stat__label">Notes</div>
-              <div className="detail-stat__value detail-stat__value--notes">{category.description}</div>
+            )}
+            <div className="detail-stat-item detail-stat-item--paid">
+              <span className="detail-stat-item__value">{formatCurrency(paid)}</span>
+              <span className="detail-stat-item__label">Paid{hasBudget ? ` · ${pct}%` : ''}</span>
             </div>
+            {hasBudget && (
+              <div className="detail-stat-item">
+                <span className="detail-stat-item__value">{formatCurrency(remaining)}</span>
+                <span className="detail-stat-item__label">Remaining</span>
+              </div>
+            )}
+            <div className="detail-stat-item">
+              <span className="detail-stat-item__value">{entries.length}</span>
+              <span className="detail-stat-item__label">Payments</span>
+            </div>
+          </div>
+
+          {hasBudget && (
+            <div className="detail-progress">
+              <div className="detail-progress__track">
+                <div
+                  className={`detail-progress__fill${pct >= 100 ? ' detail-progress__fill--over' : ''}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {category.description && (
+            <p className="detail-notes">{category.description}</p>
           )}
         </div>
 
-        {/* Chart - keyed on category id so it remounts fresh per category */}
+        {/* Chart */}
         <DetailChart key={category.id} category={category} />
 
         {/* Entries */}
         <div className="detail-entries">
           <div className="detail-entries__header">
-            <h3 className="detail-entries__title">Payments</h3>
-            <button className="btn btn--outlined" onClick={onAddPayment}>
-              <span className="material-symbols-rounded" style={{ fontSize: 16, verticalAlign: 'middle' }}>add</span> Add
+            <h3 className="detail-entries__title">Payment history</h3>
+            <button className="btn btn--filled" onClick={onAddPayment}>
+              <span className="material-symbols-rounded" style={{ fontSize: 16 }}>add</span> Add
             </button>
           </div>
 
@@ -207,7 +185,7 @@ export default function DetailView({ category, onClose, onEdit, onDelete, onAddP
             <div className="entry-list">
               {entries.map(entry => (
                 <div key={entry.id} className="entry-item">
-                  <div className="entry-item__dot" />
+                  <span className="entry-item__icon material-symbols-rounded">payments</span>
                   <div className="entry-item__info">
                     <div className="entry-item__label">{entry.label}</div>
                     <div className="entry-item__date">{formatDate(entry.date)}</div>
@@ -230,3 +208,5 @@ export default function DetailView({ category, onClose, onEdit, onDelete, onAddP
     document.body
   )
 }
+
+

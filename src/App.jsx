@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase, isConfigured, dbLoadData, dbSaveData } from './supabase'
-import { generateId } from './utils'
+import { generateId, filterCategoriesByDate, getDefaultFilter } from './utils'
 import AuthScreen from './components/AuthScreen'
 import TopBar from './components/TopBar'
 import Summary from './components/Summary'
@@ -11,11 +11,27 @@ import PaymentModal from './components/PaymentModal'
 import DetailView from './components/DetailView'
 import ConfirmModal from './components/ConfirmModal'
 import Snackbar from './components/Snackbar'
+import FilterBar from './components/FilterBar'
+import SettingsScreen from './components/SettingsScreen'
 
 export default function App() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState(null)
   const [appData, setAppData] = useState({ categories: [] })
+
+  // Settings (persisted to localStorage)
+  const [settings, setSettings] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('expense-settings') || '{}') } catch { return {} }
+  })
+  const [showSettings, setShowSettings] = useState(false)
+
+  // Date filter (session state, initialized from settings)
+  const [dateFilter, setDateFilter] = useState(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem('expense-settings') || '{}')
+      return getDefaultFilter(s.defaultFilter)
+    } catch { return { type: 'all' } }
+  })
 
   // Modal states
   const [categoryModal, setCategoryModal] = useState({ open: false, editId: null })
@@ -172,6 +188,16 @@ export default function App() {
     })
   }, [scheduleSave, showSnackbar])
 
+  // Settings handler
+  const saveSettings = useCallback((next) => {
+    setSettings(next)
+    localStorage.setItem('expense-settings', JSON.stringify(next))
+    // If the default filter changed, also reset the active date filter
+    if (next.defaultFilter !== settings.defaultFilter) {
+      setDateFilter(getDefaultFilter(next.defaultFilter))
+    }
+  }, [settings])
+
   // Export / Import
   const exportData = useCallback(() => {
     const json = JSON.stringify(appData, null, 2)
@@ -223,6 +249,8 @@ export default function App() {
     ? appData.categories.find(c => c.id === detailCategoryId)
     : null
 
+  const filteredCategories = filterCategoriesByDate(appData.categories, dateFilter)
+
   return (
     <>
       <div id="app">
@@ -231,6 +259,7 @@ export default function App() {
           onLogout={handleLogout}
           onExport={exportData}
           onImport={() => fileInputRef.current?.click()}
+          onSettings={() => setShowSettings(true)}
         />
         <input
           ref={fileInputRef}
@@ -240,11 +269,13 @@ export default function App() {
           onChange={e => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = '' }}
         />
 
-        <Summary categories={appData.categories} />
-        <OverviewChart categories={appData.categories} />
+        <FilterBar filter={dateFilter} onChange={setDateFilter} />
+
+        <Summary categories={filteredCategories} />
+        <OverviewChart categories={filteredCategories} />
 
         <section className="categories">
-          {appData.categories.map(cat => (
+          {filteredCategories.map(cat => (
             <CategoryCard
               key={cat.id}
               category={cat}
@@ -289,6 +320,14 @@ export default function App() {
           onDelete={() => { setDetailCategoryId(null); deleteCategory(detailCategoryId) }}
           onAddPayment={() => openAddPayment(detailCategoryId)}
           onDeleteEntry={deleteEntry}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsScreen
+          settings={settings}
+          onSave={saveSettings}
+          onClose={() => setShowSettings(false)}
         />
       )}
 

@@ -32,3 +32,29 @@ export function getTotals(categories) {
   }
   return { total, paid, pending: Math.max(0, total - paid) }
 }
+
+export function filterCategoriesByDate(categories, filter) {
+  if (!filter || filter.type === 'all') return categories
+  return categories.map(cat => ({
+    ...cat,
+    entries: (cat.entries || []).filter(entry => {
+      const parts = entry.date.split('-')
+      const y = parseInt(parts[0], 10)
+      const m = parseInt(parts[1], 10)
+      if (filter.type === 'month') return y === filter.year && m === filter.month
+      if (filter.type === 'year') return y === filter.year
+      return true
+    }),
+  }))
+}
+
+export function getDefaultFilter(defaultSetting) {
+  const now = new Date()
+  if (defaultSetting === 'current-month') {
+    return { type: 'month', year: now.getFullYear(), month: now.getMonth() + 1 }
+  }
+  if (defaultSetting === 'current-year') {
+    return { type: 'year', year: now.getFullYear() }
+  }
+  return { type: 'all' }
+}
