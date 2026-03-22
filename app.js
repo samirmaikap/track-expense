@@ -1,141 +1,72 @@
-// ===== Storage Keys =====
-const STORAGE_KEY     = 'track-expense-data';
-const JB_KEY_KEY      = 'track-expense-jb-key';
-const JB_BIN_KEY      = 'track-expense-jb-bin';
-const JSONBIN_BASE    = 'https://api.jsonbin.io/v3';
-
-// ===== JSONBin Config =====
-function getJbConfig() {
+// ===== Supabase Config =====
+function getSupabaseConfig() {
   const env = window.APP_CONFIG || {};
-  return {
-    // localStorage overrides injected env (allows per-device override via Settings)
-    apiKey: localStorage.getItem(JB_KEY_KEY) || env.jsonbinKey || '',
-    binId:  localStorage.getItem(JB_BIN_KEY) || env.jsonbinBin || '',
-  };
+  return { url: env.supabaseUrl || '', key: env.supabaseKey || '' };
 }
 
-function saveJbConfig(apiKey, binId) {
-  localStorage.setItem(JB_KEY_KEY, apiKey);
-  localStorage.setItem(JB_BIN_KEY, binId);
+// ===== Supabase Client =====
+let supabase = null;
+
+function initSupabase() {
+  const { url, key } = getSupabaseConfig();
+  if (!url || !key || url.includes('YOUR_')) return false;
+  supabase = window.supabase.createClient(url, key);
+  return true;
 }
 
-function clearJbConfig() {
-  localStorage.removeItem(JB_KEY_KEY);
-  localStorage.removeItem(JB_BIN_KEY);
+// ===== Auth =====
+async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
 }
 
-// ===== JSONBin API =====
-async function loadFromCloud() {
-  const { apiKey, binId } = getJbConfig();
-  if (!apiKey || !binId) return null;
-  try {
-    const res = await fetch(`${JSONBIN_BASE}/b/${binId}/latest`, {
-      headers: { 'X-Master-Key': apiKey },
-    });
-    if (!res.ok) throw new Error(`JSONBin GET ${res.status}`);
-    const json = await res.json();
-    return json.record;
-  } catch (err) {
-    console.error('JSONBin load failed:', err);
-    return null;
+async function signUp(email, password) {
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+async function signOut() {
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+}
+
+// ===== Cloud Storage =====
+async function loadData(userId) {
+  const { data, error } = await supabase
+    .from('user_data')
+    .select('data')
+    .eq('user_id', userId)
+    .single();
+  if (error) {
+    if (error.code === 'PGRST116') return { categories: [] };
+    throw error;
   }
+  return data.data || { categories: [] };
 }
 
-async function saveToCloud(data) {
-  const { apiKey, binId } = getJbConfig();
-  if (!apiKey || !binId) return false;
-  try {
-    setSyncStatus('syncing');
-    const res = await fetch(`${JSONBIN_BASE}/b/${binId}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Master-Key': apiKey,
-      },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.message || `JSONBin PUT ${res.status}`);
-    }
-    setSyncStatus('ok');
-    return true;
-  } catch (err) {
-    console.error('JSONBin save failed:', err);
-    setSyncStatus('error', err.message);
-    return false;
-  }
-}
-
-async function createBin(apiKey) {
-  const res = await fetch(`${JSONBIN_BASE}/b`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Master-Key': apiKey,
-      'X-Bin-Name': 'track-expense',
-      'X-Bin-Private': 'true',
-    },
-    body: JSON.stringify({ categories: [] }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `Could not create bin: ${res.status}`);
-  }
-  const json = await res.json();
-  return json.metadata.id;
-}
-
-// ===== Sync Status Indicator =====
-function setSyncStatus(state, tooltip = '') {
-  const el = document.getElementById('syncStatus');
-  if (!el) return;
-  el.className = 'sync-status';
-  if (state === 'syncing') {
-    el.className = 'sync-status sync-status--syncing';
-    el.innerHTML = '<span class="material-symbols-rounded" style="display:block">sync</span>';
-    el.title = 'Syncing…';
-  } else if (state === 'ok') {
-    el.className = 'sync-status sync-status--ok';
-    el.innerHTML = '<span class="material-symbols-rounded">cloud_done</span>';
-    el.title = 'Synced – click to pull latest';
-    setTimeout(() => {
-      el.innerHTML = '<span class="material-symbols-rounded">cloud_sync</span>';
-      el.className = 'sync-status sync-status--idle';
-      el.title = 'Click to sync now';
-    }, 3000);
-  } else if (state === 'error') {
-    el.className = 'sync-status sync-status--error';
-    el.innerHTML = '<span class="material-symbols-rounded">cloud_off</span>';
-    el.title = tooltip || 'Sync failed – click to retry';
-  } else if (state === 'idle') {
-    el.className = 'sync-status sync-status--idle';
-    el.innerHTML = '<span class="material-symbols-rounded">cloud_sync</span>';
-    el.title = 'Click to sync now';
-  } else {
-    el.innerHTML = '';
-  }
-}
-
-// ===== Local Storage Fallback =====
-function loadLocal() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return { categories: [] };
-}
-
-function saveLocal(data) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+async function saveData(userId, dataToSave) {
+  if (!userId) return;
+  const { error } = await supabase
+    .from('user_data')
+    .upsert(
+      { user_id: userId, data: dataToSave, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+  if (error) throw error;
 }
 
 // ===== Debounced Save =====
 let saveTimer = null;
 function scheduleSave() {
-  saveLocal(appData);
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => saveToCloud(appData), 1200);
+  saveTimer = setTimeout(() => {
+    saveData(currentUserId, appData).catch(err => {
+      console.error('Save failed:', err);
+      showSnackbar('Save failed – check your connection');
+    });
+  }, 1500);
 }
 
 function generateId() {
@@ -143,7 +74,8 @@ function generateId() {
 }
 
 // ===== State =====
-let appData = loadLocal(); // start with local immediately
+let appData = { categories: [] };
+let currentUserId = null;
 let overviewChart = null;
 let detailChart = null;
 let confirmCallback = null;
@@ -164,6 +96,7 @@ const categoryForm = $('#categoryForm');
 const categoryModalTitle = $('#categoryModalTitle');
 const categoryIdInput = $('#categoryId');
 const categoryNameInput = $('#categoryName');
+const categoryDescInput = $('#categoryDesc');
 const categoryBudgetInput = $('#categoryBudget');
 const btnCancelCategory = $('#btnCancelCategory');
 
@@ -196,6 +129,19 @@ const btnExport = $('#btnExport');
 const btnImport = $('#btnImport');
 const fileImport = $('#fileImport');
 
+// Auth
+const authScreen = $('#authScreen');
+const authForm = $('#authForm');
+const authEmailInput = $('#authEmail');
+const authPasswordInput = $('#authPassword');
+const authError = $('#authError');
+const authTitle = $('#authTitle');
+const authSubtitle = $('#authSubtitle');
+const btnAuthSubmit = $('#btnAuthSubmit');
+const btnToggleAuth = $('#btnToggleAuth');
+const userEmailDisplay = $('#userEmail');
+const btnLogout = $('#btnLogout');
+
 // ===== Formatters =====
 function formatCurrency(amount) {
   return '₹' + Number(amount).toLocaleString('en-IN', {
@@ -220,13 +166,17 @@ function getCategoryPaid(cat) {
 }
 
 function getCategoryPending(cat) {
+  if (cat.budget === null || cat.budget === undefined) return null;
   return Math.max(0, Number(cat.budget) - getCategoryPaid(cat));
 }
 
 function getTotals() {
-  let total = 0, paid = 0;
+  let total = 0, paid = 0, hasBudget = false;
   for (const cat of appData.categories) {
-    total += Number(cat.budget);
+    if (cat.budget !== null && cat.budget !== undefined) {
+      total += Number(cat.budget);
+      hasBudget = true;
+    }
     paid += getCategoryPaid(cat);
   }
   return { total, paid, pending: Math.max(0, total - paid) };
@@ -237,7 +187,6 @@ function render() {
   renderSummary();
   renderCategories();
   renderOverviewChart();
-  scheduleSave();
 }
 
 function renderSummary() {
@@ -258,40 +207,46 @@ function renderCategories() {
 
   categoriesContainer.innerHTML = cats.map(cat => {
     const paid = getCategoryPaid(cat);
-    const budget = Number(cat.budget);
-    const pct = budget > 0 ? Math.min((paid / budget) * 100, 100) : 0;
-    const isComplete = paid >= budget && budget > 0;
-    const isOver = paid > budget && budget > 0;
+    const hasBudget = cat.budget !== null && cat.budget !== undefined;
+    const budget = hasBudget ? Number(cat.budget) : 0;
+    const pct = hasBudget && budget > 0 ? Math.min((paid / budget) * 100, 100) : 0;
+    const isComplete = hasBudget && paid >= budget && budget > 0;
+    const isOver = hasBudget && paid > budget && budget > 0;
     const entryCount = (cat.entries || []).length;
 
     // Sanitize text content
     const safeName = escapeHtml(cat.name);
+    const safeDesc = cat.description ? escapeHtml(cat.description) : '';
 
     return `
       <div class="category-card" data-id="${cat.id}" onclick="openDetail('${cat.id}')">
         <div class="category-card__header">
           <span class="category-card__name">${safeName}</span>
-          <span class="category-card__badge ${isComplete ? 'category-card__badge--complete' : 'category-card__badge--pending'}">
-            ${isComplete ? 'Paid' : Math.round(pct) + '%'}
+          <span class="category-card__badge ${isComplete ? 'category-card__badge--complete' : hasBudget ? 'category-card__badge--pending' : 'category-card__badge--track'}">
+            ${isComplete ? 'Paid' : hasBudget ? Math.round(pct) + '%' : 'Track'}
           </span>
         </div>
+        ${safeDesc ? `<p class="category-card__desc">${safeDesc}</p>` : ''}
         <div class="category-card__amounts">
+          ${hasBudget ? `
           <div class="category-card__amount">
             <span class="category-card__amount-label">Budget</span>
             <span class="category-card__amount-value">${formatCurrency(budget)}</span>
-          </div>
+          </div>` : ''}
           <div class="category-card__amount">
             <span class="category-card__amount-label">Paid</span>
             <span class="category-card__amount-value">${formatCurrency(paid)}</span>
           </div>
+          ${hasBudget ? `
           <div class="category-card__amount">
             <span class="category-card__amount-label">Remaining</span>
             <span class="category-card__amount-value">${formatCurrency(Math.max(0, budget - paid))}</span>
-          </div>
+          </div>` : ''}
         </div>
+        ${hasBudget ? `
         <div class="progress">
           <div class="progress__fill ${isComplete ? 'progress__fill--complete' : ''} ${isOver ? 'progress__fill--over' : ''}" style="width:${pct}%"></div>
-        </div>
+        </div>` : ''}
         <div class="category-card__footer">
           <span class="category-card__entries-count">${entryCount} payment${entryCount !== 1 ? 's' : ''}</span>
           <button class="category-card__add-btn" onclick="event.stopPropagation(); openPaymentModal('${cat.id}')">
@@ -512,7 +467,8 @@ function openCategoryModal(editId) {
     categoryModalTitle.textContent = 'Edit Category';
     categoryIdInput.value = cat.id;
     categoryNameInput.value = cat.name;
-    categoryBudgetInput.value = cat.budget;
+    categoryDescInput.value = cat.description || '';
+    categoryBudgetInput.value = cat.budget || '';
   } else {
     categoryModalTitle.textContent = 'Add Category';
     categoryForm.reset();
@@ -526,7 +482,9 @@ function saveCategory(e) {
   e.preventDefault();
   const id = categoryIdInput.value;
   const name = categoryNameInput.value.trim();
-  const budget = parseFloat(categoryBudgetInput.value) || 0;
+  const description = categoryDescInput.value.trim();
+  const budgetRaw = categoryBudgetInput.value.trim();
+  const budget = budgetRaw !== '' ? (parseFloat(budgetRaw) || 0) : null;
 
   if (!name) return;
 
@@ -534,12 +492,14 @@ function saveCategory(e) {
     const cat = appData.categories.find(c => c.id === id);
     if (cat) {
       cat.name = name;
+      cat.description = description;
       cat.budget = budget;
     }
   } else {
     appData.categories.push({
       id: generateId(),
       name,
+      description,
       budget,
       entries: [],
     });
@@ -547,6 +507,7 @@ function saveCategory(e) {
 
   categoryModal.close();
   render();
+  scheduleSave();
   showSnackbar(id ? 'Category updated' : 'Category added');
 
   // Re-render detail if open
@@ -560,6 +521,7 @@ function deleteCategory(id) {
   showConfirm('Delete this category and all its payments?', () => {
     appData.categories = appData.categories.filter(c => c.id !== id);
     render();
+    scheduleSave();
     if (detailModal.open) detailModal.close();
     currentDetailCategoryId = null;
     showSnackbar('Category deleted');
@@ -592,6 +554,7 @@ function savePayment(e) {
 
   paymentModal.close();
   render();
+  scheduleSave();
   showSnackbar('Payment added');
 
   // Re-render detail if open
@@ -606,6 +569,7 @@ function deleteEntry(catId, entryId) {
     if (!cat) return;
     cat.entries = (cat.entries || []).filter(e => e.id !== entryId);
     render();
+    scheduleSave();
     if (currentDetailCategoryId === catId) {
       renderDetailView(cat);
     }
@@ -629,11 +593,13 @@ function openDetail(catId) {
 function renderDetailView(cat) {
   detailTitle.textContent = cat.name;
   const paid = getCategoryPaid(cat);
-  const budget = Number(cat.budget);
-  const remaining = Math.max(0, budget - paid);
-  const pct = budget > 0 ? Math.round((paid / budget) * 100) : 0;
+  const hasBudget = cat.budget !== null && cat.budget !== undefined;
+  const budget = hasBudget ? Number(cat.budget) : 0;
+  const remaining = hasBudget ? Math.max(0, budget - paid) : null;
+  const pct = hasBudget && budget > 0 ? Math.round((paid / budget) * 100) : 0;
 
   detailSummary.innerHTML = `
+    ${hasBudget ? `
     <div class="detail-stat">
       <div class="detail-stat__label">Budget</div>
       <div class="detail-stat__value">${formatCurrency(budget)}</div>
@@ -649,7 +615,20 @@ function renderDetailView(cat) {
     <div class="detail-stat">
       <div class="detail-stat__label">Entries</div>
       <div class="detail-stat__value">${(cat.entries || []).length}</div>
+    </div>` : `
+    <div class="detail-stat">
+      <div class="detail-stat__label">Total Paid</div>
+      <div class="detail-stat__value">${formatCurrency(paid)}</div>
     </div>
+    <div class="detail-stat">
+      <div class="detail-stat__label">Entries</div>
+      <div class="detail-stat__value">${(cat.entries || []).length}</div>
+    </div>`}
+    ${cat.description ? `
+    <div class="detail-stat detail-stat--full">
+      <div class="detail-stat__label">Notes</div>
+      <div class="detail-stat__value detail-stat__value--notes">${escapeHtml(cat.description)}</div>
+    </div>` : ''}
   `;
 
   renderDetailChart(cat);
@@ -703,78 +682,77 @@ function showSnackbar(message) {
   setTimeout(() => el.classList.remove('snackbar--visible'), 2500);
 }
 
-// ===== Settings Modal =====
-const settingsModal   = $('#settingsModal');
-const settingsForm    = $('#settingsForm');
-const jbKeyInput      = $('#jbKey');
-const jbBinInput      = $('#jbBin');
-const btnSettings     = $('#btnSettings');
-const btnCancelSettings = $('#btnCancelSettings');
-const btnClearToken   = $('#btnClearToken');
+// ===== Auth UI =====
+let isSignUpMode = false;
 
-function openSettingsModal() {
-  const env = window.APP_CONFIG || {};
-  const storedKey = localStorage.getItem(JB_KEY_KEY) || '';
-  const storedBin = localStorage.getItem(JB_BIN_KEY) || '';
-  // Show placeholder when key comes from injected env
-  jbKeyInput.value = storedKey ? '••••••••' : '';
-  jbKeyInput.placeholder = env.jsonbinKey ? '(injected from GitHub secret)' : '$2a$10$...';
-  jbKeyInput.dataset.hasExisting = storedKey ? '1' : '0';
-  jbBinInput.value = storedBin || env.jsonbinBin || '';
-  jbBinInput.placeholder = env.jsonbinBin ? '(injected from GitHub secret)' : 'e.g. 64a1b2c3d4e5f6...';
-  settingsModal.showModal();
+function showAuthScreen() {
+  authScreen.classList.add('auth-screen--visible');
+  document.getElementById('app').style.display = 'none';
 }
 
-settingsForm.addEventListener('submit', async (e) => {
+function hideAuthScreen(email) {
+  authScreen.classList.remove('auth-screen--visible');
+  document.getElementById('app').style.display = '';
+  if (email && userEmailDisplay) userEmailDisplay.textContent = email;
+}
+
+function setAuthMode(signUp) {
+  isSignUpMode = signUp;
+  authTitle.textContent = signUp ? 'Create Account' : 'Welcome Back';
+  authSubtitle.textContent = signUp ? 'Sign up with your email' : 'Sign in to your account';
+  btnAuthSubmit.textContent = signUp ? 'Create Account' : 'Sign In';
+  btnToggleAuth.textContent = signUp
+    ? 'Already have an account? Sign In'
+    : "Don't have an account? Sign Up";
+  authError.textContent = '';
+  authError.style.color = '';
+  authPasswordInput.autocomplete = signUp ? 'new-password' : 'current-password';
+}
+
+authForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const keyVal = jbKeyInput.value.trim();
-  const binVal = jbBinInput.value.trim();
-  const existing = localStorage.getItem(JB_KEY_KEY) || '';
-  const apiKey = (keyVal === '••••••••' && jbKeyInput.dataset.hasExisting === '1') ? existing : keyVal;
+  const email = authEmailInput.value.trim();
+  const password = authPasswordInput.value;
+  authError.textContent = '';
+  authError.style.color = '';
+  btnAuthSubmit.disabled = true;
+  btnAuthSubmit.textContent = isSignUpMode ? 'Creating…' : 'Signing in…';
 
-  let binId = binVal;
-  settingsModal.close();
-  if (!apiKey) return;
-
-  if (!binId) {
-    try {
-      showSnackbar('Creating bin…');
-      setSyncStatus('syncing');
-      binId = await createBin(apiKey);
-      showSnackbar('Bin created!');
-    } catch (err) {
-      showSnackbar('Could not create bin: ' + err.message);
-      setSyncStatus('error', err.message);
-      return;
+  try {
+    if (isSignUpMode) {
+      const result = await signUp(email, password);
+      if (!result.session) {
+        authError.style.color = 'var(--md-success)';
+        authError.textContent = '✓ Check your email to confirm your account.';
+        return;
+      }
+      currentUserId = result.user.id;
+      appData = await loadData(currentUserId).catch(() => ({ categories: [] }));
+      hideAuthScreen(result.user.email);
+      render();
+    } else {
+      const result = await signIn(email, password);
+      currentUserId = result.user.id;
+      appData = await loadData(currentUserId).catch(() => ({ categories: [] }));
+      hideAuthScreen(result.user.email);
+      render();
     }
-  }
-
-  saveJbConfig(apiKey, binId);
-  showSnackbar('Syncing…');
-  setSyncStatus('syncing');
-  const remote = await loadFromCloud();
-  if (remote) {
-    appData = remote;
-    saveLocal(appData);
-    render();
-    setSyncStatus('ok');
-    showSnackbar('Synced from JSONBin');
-  } else {
-    await saveToCloud(appData);
-    showSnackbar('Local data pushed to bin');
+  } catch (err) {
+    authError.style.color = '';
+    authError.textContent = err.message || 'Authentication failed';
+  } finally {
+    btnAuthSubmit.disabled = false;
+    setAuthMode(isSignUpMode);
   }
 });
 
-btnCancelSettings.addEventListener('click', () => settingsModal.close());
-btnClearToken.addEventListener('click', () => {
-  clearJbConfig();
-  jbKeyInput.value = '';
-  jbKeyInput.dataset.hasExisting = '0';
-  jbBinInput.value = '';
-  setSyncStatus('');
-  showSnackbar('JSONBin config cleared');
+btnToggleAuth.addEventListener('click', () => setAuthMode(!isSignUpMode));
+
+btnLogout.addEventListener('click', async () => {
+  try { await signOut(); } catch { /* ignore */ }
+  appData = { categories: [] };
+  showSnackbar('Signed out');
 });
-btnSettings.addEventListener('click', openSettingsModal);
 
 // ===== Export / Import =====
 function exportData() {
@@ -796,10 +774,10 @@ function importData(file) {
       const imported = JSON.parse(e.target.result);
       if (imported && Array.isArray(imported.categories)) {
         appData = imported;
-        saveLocal(appData);
         render();
-        showSnackbar('Imported – syncing…');
-        await saveToCloud(appData);
+        showSnackbar('Imported – saving…');
+        await saveData(currentUserId, appData);
+        showSnackbar('Data saved to cloud');
       } else {
         showSnackbar('Invalid file format');
       }
@@ -849,7 +827,7 @@ fileImport.addEventListener('change', (e) => {
 });
 
 // Close modals on backdrop click
-[categoryModal, paymentModal, confirmModal, detailModal, settingsModal].forEach(modal => {
+[categoryModal, paymentModal, confirmModal, detailModal].forEach(modal => {
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
       modal.close();
@@ -863,42 +841,39 @@ fileImport.addEventListener('change', (e) => {
 
 // ===== Init =====
 async function init() {
-  render();
-  const { apiKey, binId } = getJbConfig();
-  if (apiKey && binId) {
-    setSyncStatus('syncing');
-    const remote = await loadFromCloud();
-    if (remote) {
-      appData = remote;
-      saveLocal(appData);
-      render();
-      setSyncStatus('ok');
-    } else {
-      setSyncStatus('error', 'Could not load from JSONBin');
+  if (!initSupabase()) {
+    const configErr = document.getElementById('configError');
+    if (configErr) {
+      configErr.style.display = 'block';
+      authForm.style.display = 'none';
+      btnToggleAuth.style.display = 'none';
     }
+    showAuthScreen();
+    return;
   }
 
-  const syncEl = document.getElementById('syncStatus');
-  if (syncEl) {
-    syncEl.style.cursor = 'pointer';
-    syncEl.addEventListener('click', async () => {
-      const { apiKey, binId } = getJbConfig();
-      if (!apiKey || !binId) { openSettingsModal(); return; }
-      setSyncStatus('syncing');
-      showSnackbar('Syncing…');
-      const remote = await loadFromCloud();
-      if (remote) {
-        appData = remote;
-        saveLocal(appData);
-        render();
-        setSyncStatus('ok');
-        showSnackbar('Synced from JSONBin');
-      } else {
-        setSyncStatus('error', 'Sync failed');
-        showSnackbar('Sync failed – check your API key in Settings');
-      }
-    });
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    currentUserId = session.user.id;
+    try {
+      appData = await loadData(currentUserId);
+    } catch {
+      appData = { categories: [] };
+    }
+    hideAuthScreen(session.user.email);
+    render();
+  } else {
+    showAuthScreen();
   }
+
+  supabase.auth.onAuthStateChange((_event, session) => {
+    if (!session) {
+      currentUserId = null;
+      appData = { categories: [] };
+      render();
+      showAuthScreen();
+    }
+  });
 }
 
 init();
