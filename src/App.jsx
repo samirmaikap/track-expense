@@ -92,7 +92,11 @@ export default function App() {
 
   const handleAuth = useCallback(async (email, password, isSignUp) => {
     if (isSignUp) {
-      const { data, error } = await supabase.auth.signUp({ email, password })
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: window.location.origin + import.meta.env.BASE_URL },
+      })
       if (error) throw error
       if (!data.session) return { needsConfirmation: true }
       setUser({ id: data.user.id, email: data.user.email })
